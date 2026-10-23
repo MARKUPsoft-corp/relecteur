@@ -133,6 +133,7 @@ echo "export COPILOT_BIN=\"$COPILOT_PATH\"" >> "$ENV_FILE"
 
 # ---------- 4. Configuration de l'authentification GitHub Copilot
 log_step "3/6 : Authentification GitHub Copilot"
+log_info "Test de la connexion avec l'IA en cours (veuillez patienter quelques secondes)..."
 
 # Test de session existante
 COPILOT_AUTH_OK=0
