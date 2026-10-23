@@ -91,17 +91,20 @@
 \begin{frame}[plain]
 \begin{tikzpicture}[remember picture,overlay]
   \fill[navy] (current page.south west) rectangle (current page.north east);
-  \fill[gold] ([yshift=-5.7cm]current page.north west) rectangle ([yshift=-5.78cm]current page.north east);
-  \fill[bleu!35!navy] ([xshift=-5cm,yshift=-4cm]current page.north east) circle (4.2cm);
-  \node[anchor=north west] at ([xshift=1.2cm,yshift=-0.8cm]current page.north west) {\copilotlogo{1.5cm}};
-  \node[anchor=west,white,font=\Large\bfseries] at ([xshift=4.2cm,yshift=-1.55cm]current page.north west) {GitHub Copilot};
-  \node[anchor=west,gold,font=\bfseries\small] at ([xshift=1.2cm,yshift=-2.9cm]current page.north west) {GITHUB DEV DAYS \quad$\cdot$\quad D\'EMO PAS \`A PAS};
-  \node[anchor=west,white,font=\fontsize{30}{34}\selectfont\bfseries,align=left] at ([xshift=1.2cm,yshift=-4.3cm]current page.north west) {Un relecteur Git automatique};
-  \node[anchor=west,white!80!navy,font=\large] at ([xshift=1.2cm,yshift=-6.5cm]current page.north west) {Copilot CLI \quad$\cdot$\quad cron \quad$\cdot$\quad Telegram};
-  \node[anchor=west,white!85!navy,font=\small,text width=11cm] at ([xshift=1.2cm,yshift=-7.5cm]current page.north west) {Faire analyser chaque commit par une IA sans lui donner aucun pouvoir, et recevoir le rapport sur son t\'el\'ephone.};
-  \node[anchor=south west,white,font=\bfseries] at ([xshift=1.2cm,yshift=1.5cm]current page.south west) {Emmanuel YAKAM TCHAMEGNI};
-  \node[anchor=south west,gold,font=\small] at ([xshift=1.2cm,yshift=0.9cm]current page.south west) {Cryptographe \quad$\cdot$\quad Co-fondateur de FYS};
-  \node[anchor=south east,white!70!navy,font=\small] at ([xshift=-1.2cm,yshift=0.9cm]current page.south east) {\today};
+  \fill[bleu!25!navy] ([xshift=-3.5cm,yshift=-4.2cm]current page.north east) circle (3.8cm);
+  \fill[gold] ([yshift=-5.2cm]current page.north west) rectangle ([yshift=-5.26cm]current page.north east);
+
+  \node[anchor=north west] at ([xshift=1.2cm,yshift=-0.7cm]current page.north west) {\copilotlogo{1.4cm}};
+  \node[anchor=west,white,font=\Large\bfseries] at ([xshift=3.8cm,yshift=-1.4cm]current page.north west) {GitHub Copilot};
+  \node[anchor=west,gold,font=\bfseries\footnotesize] at ([xshift=1.2cm,yshift=-2.3cm]current page.north west) {GITHUB DEV DAYS \quad$\cdot$\quad D\'EMO PAS \`A PAS};
+  \node[anchor=west,white,font=\fontsize{27}{31}\selectfont\bfseries] at ([xshift=1.2cm,yshift=-3.3cm]current page.north west) {Un relecteur Git automatique};
+  \node[anchor=west,white!85!navy,font=\large] at ([xshift=1.2cm,yshift=-4.3cm]current page.north west) {Copilot CLI \quad$\cdot$\quad cron \quad$\cdot$\quad Telegram};
+
+  \node[anchor=north west,white!80!navy,font=\small,text width=13.5cm] at ([xshift=1.2cm,yshift=-5.6cm]current page.north west) {Faire analyser chaque commit par une IA sans lui donner aucun pouvoir, et recevoir le rapport sur son t\'el\'ephone.};
+
+  \node[anchor=south west,white,font=\bfseries\large] at ([xshift=1.2cm,yshift=1.15cm]current page.south west) {Emmanuel YAKAM TCHAMEGNI};
+  \node[anchor=south west,gold,font=\small] at ([xshift=1.2cm,yshift=0.6cm]current page.south west) {Cryptographe \quad$\cdot$\quad Co-fondateur de FYS};
+  \node[anchor=south east,white!70!navy,font=\small] at ([xshift=-1.2cm,yshift=0.6cm]current page.south east) {\today};
 \end{tikzpicture}
 \end{frame}
 
