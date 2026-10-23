@@ -332,12 +332,16 @@ except Exception:
     fi
   fi
 
-  [ -n "$CHAT_ID_SELECTED" ] && break
-done
+  if [[ ! "$CHAT_ID_SELECTED" =~ ^-?[0-9]{6,}$ ]]; then
+    log_error "Identifiant Telegram invalide : '$CHAT_ID_SELECTED'."
+    echo -e "  ${YELLOW}💡 Un identifiant Telegram doit comporter au moins 6 chiffres :${NC}"
+    echo -e "  ${DIM}• Pour un groupe : commence par -100... (ex: -1002345678901)${NC}"
+    echo -e "  ${DIM}• Pour un compte privé : nombre positif (ex: 5940820241)${NC}\n"
+    CHAT_ID_SELECTED=""
+    continue
+  fi
 
-while [ -z "$CHAT_ID_SELECTED" ]; do
-  log_error "L'identifiant Telegram du groupe est indispensable."
-  read_interactive "  Entrez l'identifiant Telegram : " CHAT_ID_SELECTED
+  [ -n "$CHAT_ID_SELECTED" ] && break
 done
 
 sed -i "/^export TG_CHAT=/d" "$ENV_FILE"
@@ -348,23 +352,50 @@ log_success "Groupe Telegram configuré : $CHAT_ID_SELECTED"
 show_step 5 "Configuration du dépôt Git surveillé"
 
 DEFAULT_REPO="$LAB_DIR/demo-repo"
-echo -e "  Entrez l'URL du dépôt GitHub de votre équipe à surveiller :"
-echo -e "  ${DIM}(Exemple: https://github.com/MARKUPsoft-corp/relecteur.git ou Entrée pour $DEFAULT_REPO)${NC}"
-read_interactive "  Dépôt Git : " REPO_INPUT
-
-TARGET_REPO="${REPO_INPUT:-$DEFAULT_REPO}"
+TARGET_REPO=""
 TARGET_BRANCH="main"
 
-if [[ "$TARGET_REPO" =~ ^https?:// ]] || [[ "$TARGET_REPO" =~ ^git@ ]]; then
-  CLONE_DIR="$LAB_DIR/$(basename "$TARGET_REPO" .git)"
-  if [ ! -d "$CLONE_DIR/.git" ]; then
-    run_with_spinner "Clonage du dépôt d'équipe ($TARGET_REPO)..." git clone "$TARGET_REPO" "$CLONE_DIR"
-  fi
-  TARGET_REPO="$CLONE_DIR"
-fi
+while [ -z "$TARGET_REPO" ]; do
+  echo -e "  Entrez l'URL du dépôt GitHub de votre équipe ou le chemin local :"
+  echo -e "  ${DIM}(Exemple: https://github.com/MARKUPsoft-corp/relecteur.git ou Entrée pour $DEFAULT_REPO)${NC}"
+  read_interactive "  Dépôt Git : " REPO_INPUT
 
-read_interactive "  Branche à surveiller [Entrée pour 'main'] : " BRANCH_INPUT
-[ -n "$BRANCH_INPUT" ] && TARGET_BRANCH="$BRANCH_INPUT"
+  CANDIDATE_REPO="${REPO_INPUT:-$DEFAULT_REPO}"
+  CANDIDATE_REPO="${CANDIDATE_REPO/#\~/$HOME}"
+
+  if [[ "$CANDIDATE_REPO" =~ ^https?:// ]] || [[ "$CANDIDATE_REPO" =~ ^git@ ]]; then
+    CLONE_DIR="$LAB_DIR/$(basename "$CANDIDATE_REPO" .git)"
+    if [ ! -d "$CLONE_DIR/.git" ]; then
+      if ! run_with_spinner "Clonage du dépôt d'équipe ($CANDIDATE_REPO)..." git clone "$CANDIDATE_REPO" "$CLONE_DIR"; then
+        log_error "Impossible de cloner '$CANDIDATE_REPO'. Vérifiez l'URL et vos droits."
+        continue
+      fi
+    fi
+    TARGET_REPO="$CLONE_DIR"
+  elif [ -d "$CANDIDATE_REPO/.git" ]; then
+    TARGET_REPO="$CANDIDATE_REPO"
+  else
+    log_error "Dépôt Git invalide : '$CANDIDATE_REPO' n'est ni une URL Git, ni un dossier Git existant (.git introuvable)."
+    echo -e "  ${YELLOW}💡 Astuce : Appuyez simplement sur [Entrée] pour utiliser le dépôt par défaut ($DEFAULT_REPO).${NC}\n"
+    continue
+  fi
+done
+
+while true; do
+  read_interactive "  Branche à surveiller [Entrée pour 'main'] : " BRANCH_INPUT
+  CANDIDATE_BRANCH="${BRANCH_INPUT:-main}"
+  
+  if git -C "$TARGET_REPO" rev-parse --verify "$CANDIDATE_BRANCH" >/dev/null 2>&1 || \
+     git -C "$TARGET_REPO" rev-parse --verify "origin/$CANDIDATE_BRANCH" >/dev/null 2>&1; then
+    TARGET_BRANCH="$CANDIDATE_BRANCH"
+    break
+  else
+    AVAIL_BRANCHES=$(git -C "$TARGET_REPO" branch -a --format='%(refname:short)' 2>/dev/null | sed 's/origin\///' | grep -v 'HEAD' | sort -u | tr '\n' ' ' || echo "main")
+    log_error "La branche '$CANDIDATE_BRANCH' est introuvable dans le dépôt."
+    echo -e "  ${YELLOW}Branches disponibles : ${AVAIL_BRANCHES:-main}${NC}"
+    echo -e "  ${DIM}Appuyez sur [Entrée] pour 'main' ou saisissez une branche existante.${NC}\n"
+  fi
+done
 
 log_success "Dépôt actif : $TARGET_REPO (branche: $TARGET_BRANCH)"
 
@@ -507,20 +538,35 @@ EOF
 chmod +x "$BIN_DIR/git-watch.sh"
 log_success "Script watcher déployé ($BIN_DIR/git-watch.sh)"
 
-# Envoi du message d'accueil sur Telegram avec Spinner
+# Envoi du message d'accueil sur Telegram avec Spinner et vérification réelle
 send_welcome() {
   local welcome_txt="🎉 Relecteur Git Automatique Actif !
 L'équipe est connectée à l'agent de revue de code intelligent.
 🌿 Dépôt surveillé : $(basename "$TARGET_REPO") ($TARGET_BRANCH)
 Chaque nouveau commit sera analysé et résumé ici en direct !"
 
-  curl -s -X POST "https://api.telegram.org/bot${CURR_TOKEN}/sendMessage" \
+  local resp
+  resp=$(curl -s --max-time 15 -X POST "https://api.telegram.org/bot${CURR_TOKEN}/sendMessage" \
     -d chat_id="$CHAT_ID_SELECTED" \
-    -d text="$welcome_txt" >/dev/null
+    -d text="$welcome_txt" 2>/dev/null || echo "{}")
+
+  if echo "$resp" | grep -q '"ok":true'; then
+    return 0
+  else
+    local err_desc
+    err_desc=$(python3 -c 'import sys, json; print(json.loads(sys.argv[1]).get("description", "Échec"))' "$resp" 2>/dev/null || echo "Échec de connexion")
+    echo "$err_desc" > /tmp/tg_err.tmp
+    return 1
+  fi
 }
 
-run_with_spinner "Envoi du message d'accueil dans le groupe Telegram..." send_welcome
-log_success "Liaison Telegram confirmée en direct !"
+if run_with_spinner "Envoi du message d'accueil dans le groupe Telegram..." send_welcome; then
+  log_success "Liaison Telegram confirmée en direct !"
+else
+  TG_ERR=$(cat /tmp/tg_err.tmp 2>/dev/null || echo "Erreur API")
+  log_error "Échec de l'envoi Telegram : $TG_ERR (chat_id: $CHAT_ID_SELECTED)"
+  echo -e "  ${YELLOW}⚠️ Le bot n'a pas pu envoyer le message. Assurez-vous que le bot est membre ou administrateur du groupe.${NC}"
+fi
 
 # Initialisation de l'état
 "$BIN_DIR/git-watch.sh" >/dev/null 2>&1 || true
@@ -530,7 +576,7 @@ log_info "Configuration de la planification cron (toutes les minutes)..."
 CRON_LINE="* * * * * $BIN_DIR/git-watch.sh >> $REPORTS_DIR/cron.log 2>&1"
 CRON_PATH="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
-(crontab -l 2>/dev/null | grep -v "git-watch.sh" || true; echo "$CRON_PATH"; echo "$CRON_LINE") | crontab -
+(crontab -l 2>/dev/null | grep -v "git-watch.sh" | grep -v "PATH=" || true; echo "$CRON_PATH"; echo "$CRON_LINE") | crontab -
 log_success "Tâche cron active !"
 
 # ---------- Synthèse Finale
