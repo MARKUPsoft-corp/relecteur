@@ -22,6 +22,15 @@
 4. Il génère un rapport technique senior (explication détaillée, cas limites, failles de sécurité, cohérence du commit, message conventionnel suggéré).
 5. Il notifie instantanément l'ensemble de l'équipe sur leur **groupe Telegram** avec l'identité de l'auteur, la branche, les fichiers touchés et l'analyse complète.
 
+### 👥 Comment ça marche pour l'équipe ? (Une seule installation pour tous)
+
+> [!IMPORTANT]
+> **Est-ce que les autres membres de l'équipe doivent installer un bot ou un logiciel sur leur machine ?**  
+> **NON, absolument pas !**  
+> * **1 seule installation centrale :** Le relecteur s'installe sur **une seule machine** (l'ordinateur de l'admin / lead dev, ou un petit serveur d'équipe / VPS).
+> * **Zéro installation pour les développeurs :** Vos collègues continuent d'utiliser Git normalement (`git commit`, `git push`). Ils n'ont besoin ni de Node.js, ni de Copilot CLI, ni d'aucun script sur leur poste.
+> * **Notification collective :** Dès qu'un collaborateur pousse sur GitHub, le bot publie la revue technique dans le **groupe Telegram commun**. Toute l'équipe reçoit la notification instantanément sur son smartphone !
+
 ---
 
 ## ⚡ Installation Express en 1 ligne (Recommandé)
