@@ -89,11 +89,14 @@ Chaque équipe peut créer son propre bot Telegram gratuitement via le bot offic
 ### 3. Créer le Groupe Telegram de l'Équipe & y ajouter le Bot
 
 1. Dans Telegram, créez un nouveau groupe (ex: **« Équipe Dev — Alertes Commits »**) et invitez vos collègues.
-2. Ajoutez votre bot (`@mon_equipe_gitwatch_bot`) comme membre du groupe, exactement comme s'il s'agissait d'un contact humain.
-3. **Autoriser le bot dans le groupe :**
-   * Donnez les droits d'administration au bot dans le groupe (ou assurez-vous qu'il peut lire les messages).
-   * Envoyez un premier message dans le groupe (par exemple tapez `/start` ou `bonjour`).  
-   *(Cette étape est indispensable : elle crée la file d'attente permettant à l'installateur de détecter le groupe).*
+2. Ajoutez votre bot (`@mon_equipe_gitwatch_bot`) comme membre du groupe, exactement comme un contact.
+3. **⚠️ Étape cruciale : Autoriser le bot (Piège du *Group Privacy Mode*) :**
+   > [!IMPORTANT]
+   > Par défaut, Telegram applique le **Group Privacy Mode** sur tous les bots. Le bot est « aveugle » aux discussions ordinaires et ne reçoit aucun message texte normal. Tant que la file d'attente est vide, l'installateur ne peut pas deviner l'ID du groupe !
+   >
+   > **Pour activer la détection immédiatement, faites UNE des 2 actions suivantes :**
+   > * **Option recommandée :** Nommez le bot **Administrateur** de votre groupe Telegram.
+   > * **Alternative rapide :** Tapez la commande `/start` (ou `/start@mon_equipe_gitwatch_bot`) dans le groupe.
 
 ---
 
@@ -101,20 +104,23 @@ Chaque équipe peut créer son propre bot Telegram gratuitement via le bot offic
 
 Deux méthodes au choix :
 
-#### Méthode 1 : Automatique via notre installateur (Magique 🪄)
-Notre script `install.sh` interroge directement l'API Telegram. Dès que vous avez envoyé un message dans votre groupe, l'installateur affiche automatiquement :
+#### Méthode 1 : Automatique via notre installateur (Recommandée 🪄)
+Notre script `install.sh` interroge en direct l'API Telegram (`getUpdates`). Dès que le bot est administrateur ou qu'une commande `/start` a été tapée dans le groupe, l'installateur affiche un menu interactif :
 ```text
 Conversations & Groupes Telegram récents détectés :
   [1] 👥 Équipe Dev — Alertes Commits (supergroup) — ID : -1002345678901
   [2] 👤 Emmanuel (private) — ID : 5940820241
 Choisissez le numéro du groupe à notifier : 1
 ```
-Vous tapez juste **`1`** et c'est configuré !
+Tapez simplement **`1`** et le bot est relié au groupe !  
+*(Si vous avez oublié de taper `/start`, l'installateur vous propose de taper **`R`** pour rafraîchir la détection instantanément sans quitter le script).*
 
 #### Méthode 2 : Manuelle (si besoin)
-* Invitez le bot d'aide **`@RawDataBot`** ou **`@userinfobot`** dans votre groupe : il affichera instantanément un pavé JSON contenant `"chat": { "id": -100xxxxxxxxxx }`.
-* Copiez ce nombre (avec le tiret `-`) puis retirez le bot d'aide.
-* *Note : Les identifiants de groupes Telegram commencent toujours par un nombre négatif (ex: `-100...`).*
+* L'identifiant d'un groupe Telegram commence **toujours par un tiret négatif** (ex: `-1002345678901`).
+* Pour l'obtenir en 5 secondes :
+  1. Invitez temporairement le bot d'aide **`@RawDataBot`** dans votre groupe.
+  2. Il affiche un JSON contenant `"chat": { "id": -100xxxxxxxxxx }`.
+  3. Copiez cet identifiant négatif complet et collez-le dans l'installateur, puis retirez `@RawDataBot`.
 
 ---
 

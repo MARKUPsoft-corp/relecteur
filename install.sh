@@ -259,15 +259,19 @@ done
 sed -i "/^export TG_TOKEN=/d" "$ENV_FILE"
 echo "export TG_TOKEN=\"$CURR_TOKEN\"" >> "$ENV_FILE"
 
-# Détection animée des groupes avec Spinner
-UPDATES_JSON=""
-fetch_telegram_updates() {
-  UPDATES_JSON=$(curl -s --max-time 10 "https://api.telegram.org/bot${CURR_TOKEN}/getUpdates" || echo "{}")
-}
+# Détection animée des groupes avec Spinner et retry
+CHAT_ID_SELECTED=""
+EXISTING_CHAT=$(grep -E '^export TG_CHAT=' "$ENV_FILE" 2>/dev/null | cut -d'"' -f2 || true)
 
-run_with_spinner "Recherche des groupes et conversations actives sur Telegram..." fetch_telegram_updates
+while true; do
+  UPDATES_JSON=""
+  fetch_telegram_updates() {
+    UPDATES_JSON=$(curl -s --max-time 10 "https://api.telegram.org/bot${CURR_TOKEN}/getUpdates" || echo "{}")
+  }
 
-CHATS_FOUND=$(python3 -c '
+  run_with_spinner "Recherche des groupes et conversations actives sur Telegram..." fetch_telegram_updates
+
+  CHATS_FOUND=$(python3 -c '
 import sys, json
 try:
     d = json.loads(sys.argv[1])
@@ -288,38 +292,48 @@ except Exception:
     pass
 ' "$UPDATES_JSON" 2>/dev/null || true)
 
-CHAT_ID_SELECTED=""
-EXISTING_CHAT=$(grep -E '^export TG_CHAT=' "$ENV_FILE" 2>/dev/null | cut -d'"' -f2 || true)
+  if [ -n "$CHATS_FOUND" ]; then
+    echo -e "\n  ${GREEN}Conversations & Groupes Telegram récents détectés :${NC}"
+    IDX=1
+    declare -A MAP_IDS
+    while IFS='|' read -r CID CTITLE CTYPE; do
+      ICON="👤"
+      [ "$CTYPE" = "group" ] || [ "$CTYPE" = "supergroup" ] && ICON="👥"
+      [ "$CTYPE" = "channel" ] && ICON="📢"
+      echo -e "    [${BOLD}$IDX${NC}] $ICON ${BOLD}$CTITLE${NC} (${CYAN}$CTYPE${NC}) — ID : ${YELLOW}$CID${NC}"
+      MAP_IDS[$IDX]="$CID"
+      IDX=$((IDX + 1))
+    done <<< "$CHATS_FOUND"
 
-if [ -n "$CHATS_FOUND" ]; then
-  echo -e "\n  ${GREEN}Conversations & Groupes Telegram récents détectés :${NC}"
-  IDX=1
-  declare -A MAP_IDS
-  while IFS='|' read -r CID CTITLE CTYPE; do
-    ICON="👤"
-    [ "$CTYPE" = "group" ] || [ "$CTYPE" = "supergroup" ] && ICON="👥"
-    [ "$CTYPE" = "channel" ] && ICON="📢"
-    echo -e "    [${BOLD}$IDX${NC}] $ICON ${BOLD}$CTITLE${NC} (${CYAN}$CTYPE${NC}) — ID : ${YELLOW}$CID${NC}"
-    MAP_IDS[$IDX]="$CID"
-    IDX=$((IDX + 1))
-  done <<< "$CHATS_FOUND"
-
-  PROMPT_CHOICE="  Choisissez le numéro du groupe à notifier (1-$((IDX-1))) [ou Entrée pour saisir] : "
-  [ -n "$EXISTING_CHAT" ] && PROMPT_CHOICE="  Choisissez le numéro [Entrée pour garder $EXISTING_CHAT] : "
-  read_interactive "$PROMPT_CHOICE" NUM_CHOICE
-  if [ -n "$NUM_CHOICE" ] && [ -n "${MAP_IDS[$NUM_CHOICE]:-}" ]; then
-    CHAT_ID_SELECTED="${MAP_IDS[$NUM_CHOICE]}"
-  fi
-fi
-
-if [ -z "$CHAT_ID_SELECTED" ]; then
-  if [ -n "$EXISTING_CHAT" ]; then
-    read_interactive "  ID Telegram du groupe [Entrée pour conserver $EXISTING_CHAT] : " MANUAL_CHAT
-    CHAT_ID_SELECTED="${MANUAL_CHAT:-$EXISTING_CHAT}"
+    PROMPT_CHOICE="  Choisissez le numéro du groupe à notifier (1-$((IDX-1))) [ou Entrée pour saisir manuellement] : "
+    [ -n "$EXISTING_CHAT" ] && PROMPT_CHOICE="  Choisissez le numéro [Entrée pour garder $EXISTING_CHAT] : "
+    read_interactive "$PROMPT_CHOICE" NUM_CHOICE
+    if [ -n "$NUM_CHOICE" ] && [ -n "${MAP_IDS[$NUM_CHOICE]:-}" ]; then
+      CHAT_ID_SELECTED="${MAP_IDS[$NUM_CHOICE]}"
+      break
+    fi
   else
-    read_interactive "  Entrez l'identifiant Telegram du groupe d'équipe (ex: -100xxxxxxxxxx) : " CHAT_ID_SELECTED
+    echo -e "\n  ${YELLOW}ℹ️  Aucun groupe détecté automatiquement dans la file Telegram.${NC}"
+    echo -e "  ${DIM}• Pourquoi ? Par défaut, Telegram applique le 'Group Privacy Mode' aux bots :${NC}"
+    echo -e "  ${DIM}  le bot ne peut pas lire les messages ordinaires sans commande ou mention.${NC}"
+    echo -e "  ${DIM}• Déblocage immédiat : nommez le bot Administrateur du groupe OU envoyez /start dans le groupe.${NC}\n"
+    read_interactive "  Réessayer la détection automatique ? [R pour Réessayer / Entrée pour saisie manuelle] : " RETRY_DETECTION
+    if [[ "$RETRY_DETECTION" =~ ^[rRyY]$ ]]; then
+      continue
+    fi
   fi
-fi
+
+  if [ -z "$CHAT_ID_SELECTED" ]; then
+    if [ -n "$EXISTING_CHAT" ]; then
+      read_interactive "  ID Telegram du groupe [Entrée pour conserver $EXISTING_CHAT] : " MANUAL_CHAT
+      CHAT_ID_SELECTED="${MANUAL_CHAT:-$EXISTING_CHAT}"
+    else
+      read_interactive "  Entrez l'identifiant Telegram du groupe d'équipe (ex: -100xxxxxxxxxx) : " CHAT_ID_SELECTED
+    fi
+  fi
+
+  [ -n "$CHAT_ID_SELECTED" ] && break
+done
 
 while [ -z "$CHAT_ID_SELECTED" ]; do
   log_error "L'identifiant Telegram du groupe est indispensable."
