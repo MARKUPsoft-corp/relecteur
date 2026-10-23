@@ -77,23 +77,27 @@ run_with_spinner() {
   return $status
 }
 
-# ---------- Barres de progression d'étapes
+# ---------- Barres de progression d'étapes animées à vue d'œil
+PREV_PCT=0
 show_step() {
   local current=$1
   local total=6
   local title="$2"
-  local percent=$(( (current * 100) / total ))
-  local bar_len=20
-  local filled=$(( (current * bar_len) / total ))
-  local empty=$(( bar_len - filled ))
+  local target_pct=$(( (current * 100) / total ))
+  local bar_len=24
 
-  local bar=""
-  for ((i=0; i<filled; i++)); do bar+="█"; done
-  for ((i=0; i<empty; i++)); do bar+="░"; done
-
-  echo -e "\n${BOLD}${PURPLE}┌──────────────────────────────────────────────────────────────────┐${NC}"
-  echo -e "${BOLD}${PURPLE}│${NC} ${CYAN}[${bar}]${NC} ${YELLOW}${percent}%${NC} — ${BOLD}Étape ${current}/${total} : ${title}${NC}"
-  echo -e "${BOLD}${PURPLE}└──────────────────────────────────────────────────────────────────┘${NC}"
+  echo -e "\n${BOLD}${PURPLE}┌──────────────────────────────────────────────────────────────────────┐${NC}"
+  for ((p=PREV_PCT; p<=target_pct; p+=2)); do
+    local filled=$(( (p * bar_len) / 100 ))
+    local empty=$(( bar_len - filled ))
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+    printf "\r${BOLD}${PURPLE}│${NC} ${CYAN}[${bar}]${NC} ${YELLOW}%3d%%${NC} — ${BOLD}Étape %d/%d : %-30s${NC} ${BOLD}${PURPLE}│${NC}" "$p" "$current" "$total" "$title"
+    sleep 0.02
+  done
+  PREV_PCT=$target_pct
+  echo -e "\n${BOLD}${PURPLE}└──────────────────────────────────────────────────────────────────────┘${NC}"
 }
 
 log_info()    { echo -e "  ${BLUE}ℹ${NC}  $*"; }
