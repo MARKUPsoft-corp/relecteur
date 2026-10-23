@@ -16,7 +16,92 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# ---------- Fonctions d'affichage
+# Helper pour lire depuis le terminal réel même sous "curl | bash"
+read_interactive() {
+  local prompt="$1"
+  local varname="$2"
+  local secret="${3:-0}"
+  local val=""
+
+  if [ -c /dev/tty ]; then
+    if [ "$secret" -eq 1 ]; then
+      read -rsp "$prompt" val </dev/tty
+      echo
+    else
+      read -rp "$prompt" val </dev/tty
+    fi
+  else
+    if [ "$secret" -eq 1 ]; then
+      read -rsp "$prompt" val
+      echo
+    else
+      read -rp "$prompt" val
+    fi
+  fi
+  printf -v "$varname" '%s' "$val"
+}
+
+# ---------- Animations visuelles : Spinner
+spinner() {
+  local pid=$1
+  local msg="$2"
+  local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  tput civis 2>/dev/null || true
+  while kill -0 "$pid" 2>/dev/null; do
+    local temp=${spinstr#?}
+    printf "\r  ${CYAN}%c${NC}  %b" "$spinstr" "$msg"
+    spinstr=$temp${spinstr%"$temp"}
+    sleep 0.08
+  done
+  tput cnorm 2>/dev/null || true
+  printf "\r\033[K"
+}
+
+run_with_spinner() {
+  local msg="$1"
+  shift
+  local log_tmp
+  log_tmp=$(mktemp)
+  "$@" >"$log_tmp" 2>&1 &
+  local pid=$!
+  spinner "$pid" "$msg"
+  wait "$pid"
+  local status=$?
+  if [ $status -eq 0 ]; then
+    echo -e "  ${GREEN}✔${NC}  $msg"
+  else
+    echo -e "  ${RED}✖${NC}  $msg ${RED}(échec)${NC}"
+    tail -n 10 "$log_tmp" | sed 's/^/      /'
+  fi
+  rm -f "$log_tmp"
+  return $status
+}
+
+# ---------- Barres de progression d'étapes
+show_step() {
+  local current=$1
+  local total=6
+  local title="$2"
+  local percent=$(( (current * 100) / total ))
+  local bar_len=20
+  local filled=$(( (current * bar_len) / total ))
+  local empty=$(( bar_len - filled ))
+
+  local bar=""
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+
+  echo -e "\n${BOLD}${PURPLE}┌──────────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "${BOLD}${PURPLE}│${NC} ${CYAN}[${bar}]${NC} ${YELLOW}${percent}%${NC} — ${BOLD}Étape ${current}/${total} : ${title}${NC}"
+  echo -e "${BOLD}${PURPLE}└──────────────────────────────────────────────────────────────────┘${NC}"
+}
+
+log_info()    { echo -e "  ${BLUE}ℹ${NC}  $*"; }
+log_success() { echo -e "  ${GREEN}✔${NC}  ${GREEN}$*${NC}"; }
+log_warn()    { echo -e "  ${YELLOW}⚠${NC}  ${YELLOW}$*${NC}"; }
+log_error()   { echo -e "  ${RED}✖${NC}  ${RED}$*${NC}"; }
+
+# ---------- 1. Bannière d'accueil
 banner() {
   clear 2>/dev/null || true
   echo -e "${CYAN}${BOLD}"
@@ -29,20 +114,13 @@ banner() {
  ╚═════╝ ╚═╝   ╚═╝        ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝╚═╝  ╚═╝
 EOF
   echo -e "${YELLOW}       Relecteur Git Automatique · Copilot CLI · Telegram · cron${NC}"
-  echo -e "${DIM}       Installation interactive & Déploiement d'équipe${NC}\n"
+  echo -e "${DIM}       Installation interactive & Déploiement d'équipe (GitHub Dev Days)${NC}\n"
 }
 
-log_info()    { echo -e " ${BLUE}ℹ${NC}  $*"; }
-log_step()    { echo -e "\n${BOLD}${PURPLE}==>${NC} ${BOLD}$*${NC}"; }
-log_success() { echo -e " ${GREEN}✔${NC}  ${GREEN}$*${NC}"; }
-log_warn()    { echo -e " ${YELLOW}⚠${NC}  ${YELLOW}$*${NC}"; }
-log_error()   { echo -e " ${RED}✖${NC}  ${RED}$*${NC}"; }
-
-# ---------- 1. Bannière d'accueil
 banner
 
 # ---------- 2. Vérification des prérequis système
-log_step "1/6 : Vérification du système et des dépendances"
+show_step 1 "Vérification du système et des dépendances"
 
 OS="$(uname -s)"
 if [ "$OS" != "Linux" ]; then
@@ -50,37 +128,29 @@ if [ "$OS" != "Linux" ]; then
   exit 1
 fi
 
-check_cmd() {
+check_and_install_pkg() {
   local cmd="$1"
   local pkg="${2:-$1}"
   if command -v "$cmd" >/dev/null 2>&1; then
-    log_success "$cmd est installé"
+    log_success "Utilitaire '$cmd' opérationnel"
   else
-    log_warn "$cmd est manquant. Tentative d'installation de $pkg..."
-    if command -v apt-get >/dev/null 2>&1; then
-      sudo apt-get update -qq && sudo apt-get install -y -qq "$pkg"
-      log_success "$cmd installé avec succès"
-    else
-      log_error "Impossible d'installer $cmd automatiquement. Installez $pkg et relancez."
-      exit 1
-    fi
+    run_with_spinner "Installation du paquet système '$pkg' via apt..." sudo apt-get update -qq && sudo apt-get install -y -qq "$pkg"
   fi
 }
 
-check_cmd git
-check_cmd curl
-check_cmd cron
-check_cmd python3
+check_and_install_pkg git
+check_and_install_pkg curl
+check_and_install_pkg cron
+check_and_install_pkg python3
 
-# Vérification du démon cron
+# Démon cron
 if systemctl is-active cron >/dev/null 2>&1; then
-  log_success "Le démon cron est actif"
+  log_success "Service cron actif en arrière-plan"
 else
-  log_info "Activation du démon cron..."
-  sudo systemctl enable --now cron >/dev/null 2>&1 || true
+  run_with_spinner "Activation et démarrage du service cron..." sudo systemctl enable --now cron
 fi
 
-# Vérification de Node.js >= 22
+# Node.js >= 22
 NODE_OK=0
 if command -v node >/dev/null 2>&1; then
   NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
@@ -91,24 +161,21 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 if [ "$NODE_OK" -eq 0 ]; then
-  log_warn "Node.js >= v22 est requis. Installation via le dépôt officiel NodeSource..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y -qq nodejs
-  log_success "Node.js v$(node -v) installé avec succès"
+  run_with_spinner "Installation de Node.js v22 via NodeSource..." bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y -qq nodejs'
+  log_success "Node.js mis à niveau vers v$(node -v)"
 fi
 
-# Vérification de GitHub Copilot CLI
+# GitHub Copilot CLI
 if command -v copilot >/dev/null 2>&1; then
-  log_success "GitHub Copilot CLI est déjà installé ($(copilot --version 2>/dev/null | head -n 1))"
+  log_success "GitHub Copilot CLI détecté ($(copilot --version 2>/dev/null | head -n 1))"
 else
-  log_info "Installation globale de GitHub Copilot CLI..."
-  sudo npm install -g @github/copilot
+  run_with_spinner "Installation globale de @github/copilot..." sudo npm install -g @github/copilot
   log_success "GitHub Copilot CLI installé ($(command -v copilot))"
 fi
 COPILOT_PATH="$(command -v copilot)"
 
 # ---------- 3. Création de l'arborescence et sécurisation des droits
-log_step "2/6 : Préparation de l'arborescence de travail sécurisée"
+show_step 2 "Préparation de l'arborescence de travail isolée"
 
 LAB_DIR="$HOME/lab"
 BIN_DIR="$LAB_DIR/bin"
@@ -121,80 +188,80 @@ mkdir -p "$BIN_DIR" "$REPORTS_DIR" "$SANDBOX_DIR"
 mkdir -p "$CONF_DIR" && chmod 700 "$CONF_DIR"
 touch "$ENV_FILE" && chmod 600 "$ENV_FILE"
 
-log_success "Répertoires créés :"
-echo -e "   ${DIM}• Scripts       :${NC} $BIN_DIR"
-echo -e "   ${DIM}• Rapports      :${NC} $REPORTS_DIR"
-echo -e "   ${DIM}• Bac à sable   :${NC} $SANDBOX_DIR (isolé et vide)"
-echo -e "   ${DIM}• Configuration :${NC} $ENV_FILE (chmod 600)"
-
-# Enregistrement du chemin absolu de Copilot
+# Mémorisation sécurisée de COPILOT_BIN
 sed -i "/^export COPILOT_BIN=/d" "$ENV_FILE"
 echo "export COPILOT_BIN=\"$COPILOT_PATH\"" >> "$ENV_FILE"
 
-# ---------- 4. Configuration de l'authentification GitHub Copilot
-log_step "3/6 : Authentification GitHub Copilot"
-log_info "Test de la connexion avec l'IA en cours (veuillez patienter quelques secondes)..."
+log_success "Espaces créés avec permissions strictes :"
+echo -e "     ${DIM}• Bac à sable IA  :${NC} $SANDBOX_DIR ${DIM}(vide, aucun outil)${NC}"
+echo -e "     ${DIM}• Dossier scripts :${NC} $BIN_DIR"
+echo -e "     ${DIM}• Rapports d'équipe:${NC} $REPORTS_DIR"
+echo -e "     ${DIM}• Secrets chiffrés:${NC} $ENV_FILE ${DIM}(chmod 600)${NC}"
 
-# Test de session existante
+# ---------- 4. Authentification GitHub Copilot
+show_step 3 "Authentification de l'agent IA (GitHub Copilot)"
+
 COPILOT_AUTH_OK=0
-if "$COPILOT_PATH" -p "Réponds uniquement : OK" -s >/dev/null 2>&1; then
-  log_success "Session GitHub Copilot active et validée !"
-  COPILOT_AUTH_OK=1
-fi
+test_copilot() {
+  "$COPILOT_PATH" -p "Réponds uniquement : OK" -s >/dev/null 2>&1
+}
 
-if [ "$COPILOT_AUTH_OK" -eq 0 ]; then
-  echo -e "\n${YELLOW}Copilot CLI nécessite une authentification.${NC}"
-  echo -e "Deux options au choix :"
-  echo -e " 1) Saisir un Personal Access Token (Fine-grained PAT avec permission 'Copilot Requests')"
-  echo -e " 2) Lancer la connexion web interactive ('copilot' dans le terminal)"
-  echo
-  read -rp " Voulez-vous renseigner un jeton GitHub PAT maintenant ? [O/n] : " RESP_PAT
-  if [[ "$RESP_PAT" =~ ^[oOyY]?$ ]]; then
-    read -rsp " Collez votre GitHub Token (PAT) [saisie masquée] : " PAT_VAL
-    echo
+if run_with_spinner "Vérification de la connexion avec l'IA GitHub Copilot..." test_copilot; then
+  COPILOT_AUTH_OK=1
+  log_success "Agent Copilot authentifié et prêt à relire !"
+else
+  echo -e "\n  ${YELLOW}Aucune session Copilot active détectée.${NC}"
+  echo -e "  Deux méthodes d'authentification possibles :"
+  echo -e "    [1] Coller un jeton GitHub PAT ${DIM}(Fine-grained, permission 'Copilot Requests')${NC}"
+  echo -e "    [2] Connexion interactive via navigateur web ${DIM}('copilot' dans un terminal)${NC}\n"
+  
+  read_interactive "  Voulez-vous entrer un jeton GitHub (PAT) maintenant ? [O/n] : " RESP_PAT
+  if [[ "$RESP_PAT" =~ ^[oOyY]?$ ]] || [ -z "$RESP_PAT" ]; then
+    read_interactive "  Collez votre GitHub Token (PAT) [masqué] : " PAT_VAL 1
     if [ -n "$PAT_VAL" ]; then
       sed -i "/^export COPILOT_GITHUB_TOKEN=/d" "$ENV_FILE"
       echo "export COPILOT_GITHUB_TOKEN=\"$PAT_VAL\"" >> "$ENV_FILE"
-      log_success "Jeton GitHub enregistré de manière sécurisée."
+      log_success "Jeton GitHub PAT sauvegardé."
     fi
   else
-    log_info "Lancez 'copilot' dans un terminal séparé pour vous connecter, puis relancez cet installateur."
+    log_info "Vous pourrez lancer 'copilot' dans votre terminal pour l'authentification web."
   fi
 fi
 
-# ---------- 5. Configuration de l'alerte Telegram (Canal individuel ou Groupe d'équipe)
-log_step "4/6 : Configuration du canal Telegram (Groupe d'équipe ou Direct)"
+# ---------- 5. Configuration Telegram d'équipe
+show_step 4 "Configuration du canal Telegram de l'équipe"
 
-echo -e "${CYAN}Instructions pour connecter le bot Telegram à votre équipe :${NC}"
-echo -e " 1. Créez un bot via ${BOLD}@BotFather${NC} (commande /newbot) ou réutilisez un bot existant."
-echo -e " 2. Pour une équipe : ${BOLD}Ajoutez le bot dans le groupe Telegram de l'équipe${NC}."
-echo -e " 3. Envoyez un message ou la commande ${BOLD}/start${NC} dans le groupe pour ouvrir le canal.\n"
+echo -e "  ${CYAN}Pour relier le relecteur au groupe Telegram de votre équipe :${NC}"
+echo -e "  ${DIM}1. Invitez votre bot (ex: @Markup_gitwatch_bot) dans votre groupe Telegram d'équipe.${NC}"
+echo -e "  ${DIM}2. Envoyez un message ou la commande /start dans le groupe pour ouvrir la liaison.${NC}\n"
 
-# Lecture du TG_TOKEN
+# Lecture du token existant
 CURR_TOKEN=$(grep -E '^export TG_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d'"' -f2 || true)
 if [ -n "$CURR_TOKEN" ]; then
-  read -rp " Jeton Telegram déjà présent (${CURR_TOKEN:0:8}...). Conserver ? [O/n] : " KEEP_TK
-  if [[ ! "$KEEP_TK" =~ ^[oOyY]?$ ]]; then
-    read -rsp " Entrez votre nouveau Jeton Bot Telegram [masqué] : " TG_TOKEN_INPUT
-    echo
-    [ -n "$TG_TOKEN_INPUT" ] && CURR_TOKEN="$TG_TOKEN_INPUT"
+  MASKED_TK="${CURR_TOKEN:0:6}...${CURR_TOKEN: -4}"
+  read_interactive "  Jeton Telegram détecté ($MASKED_TK). Conserver ? [O/n] : " KEEP_TK
+  if [[ "$KEEP_TK" =~ ^[nN]$ ]]; then
+    read_interactive "  Entrez le nouveau Jeton Bot Telegram (de @BotFather) [masqué] : " CURR_TOKEN 1
   fi
 else
-  read -rsp " Entrez votre Jeton Bot Telegram (ex: 123456:ABC-DEF...) [masqué] : " CURR_TOKEN
-  echo
+  read_interactive "  Entrez le Jeton Bot Telegram (fourni par @BotFather) [masqué] : " CURR_TOKEN 1
 fi
 
-if [ -z "$CURR_TOKEN" ]; then
-  log_error "Le jeton Telegram est indispensable pour recevoir les alertes."
-  exit 1
-fi
+while [ -z "$CURR_TOKEN" ]; do
+  log_error "Le jeton Telegram est obligatoire."
+  read_interactive "  Entrez le Jeton Bot Telegram [masqué] : " CURR_TOKEN 1
+done
 
 sed -i "/^export TG_TOKEN=/d" "$ENV_FILE"
 echo "export TG_TOKEN=\"$CURR_TOKEN\"" >> "$ENV_FILE"
 
-# Détection automatique du Chat ID (personnel ou groupe d'équipe)
-log_info "Interrogation de l'API Telegram pour détecter les groupes ou conversations actives..."
-UPDATES_JSON=$(curl -s "https://api.telegram.org/bot${CURR_TOKEN}/getUpdates" || echo "{}")
+# Détection animée des groupes avec Spinner
+UPDATES_JSON=""
+fetch_telegram_updates() {
+  UPDATES_JSON=$(curl -s --max-time 10 "https://api.telegram.org/bot${CURR_TOKEN}/getUpdates" || echo "{}")
+}
+
+run_with_spinner "Recherche des groupes et conversations actives sur Telegram..." fetch_telegram_updates
 
 CHATS_FOUND=$(python3 -c '
 import sys, json
@@ -207,7 +274,7 @@ try:
         if msg:
             chat = msg.get("chat", {})
             cid = str(chat.get("id"))
-            title = chat.get("title") or chat.get("first_name") or "Inconnu"
+            title = chat.get("title") or chat.get("first_name") or "Sans titre"
             ctype = chat.get("type", "private")
             if cid and cid not in seen:
                 seen[cid] = (title, ctype)
@@ -218,44 +285,54 @@ except Exception:
 ' "$UPDATES_JSON" 2>/dev/null || true)
 
 CHAT_ID_SELECTED=""
+EXISTING_CHAT=$(grep -E '^export TG_CHAT=' "$ENV_FILE" 2>/dev/null | cut -d'"' -f2 || true)
 
 if [ -n "$CHATS_FOUND" ]; then
-  echo -e "\n${GREEN}Canaux / Groupes détectés récents :${NC}"
+  echo -e "\n  ${GREEN}Conversations & Groupes Telegram récents détectés :${NC}"
   IDX=1
   declare -A MAP_IDS
   while IFS='|' read -r CID CTITLE CTYPE; do
-    echo -e "   [${BOLD}$IDX${NC}] ${BOLD}$CTITLE${NC} (${CYAN}$CTYPE${NC}) — ID : $CID"
+    ICON="👤"
+    [ "$CTYPE" = "group" ] || [ "$CTYPE" = "supergroup" ] && ICON="👥"
+    [ "$CTYPE" = "channel" ] && ICON="📢"
+    echo -e "    [${BOLD}$IDX${NC}] $ICON ${BOLD}$CTITLE${NC} (${CYAN}$CTYPE${NC}) — ID : ${YELLOW}$CID${NC}"
     MAP_IDS[$IDX]="$CID"
     IDX=$((IDX + 1))
   done <<< "$CHATS_FOUND"
 
-  read -rp " Choisissez le numéro du canal à notifier (ou tapez Entrée pour saisir manuellement) : " NUM_CHOICE
+  PROMPT_CHOICE="  Choisissez le numéro du groupe à notifier (1-$((IDX-1))) [ou Entrée pour saisir] : "
+  [ -n "$EXISTING_CHAT" ] && PROMPT_CHOICE="  Choisissez le numéro [Entrée pour garder $EXISTING_CHAT] : "
+  read_interactive "$PROMPT_CHOICE" NUM_CHOICE
   if [ -n "$NUM_CHOICE" ] && [ -n "${MAP_IDS[$NUM_CHOICE]:-}" ]; then
     CHAT_ID_SELECTED="${MAP_IDS[$NUM_CHOICE]}"
-    log_success "Canal sélectionné : $CHAT_ID_SELECTED"
   fi
 fi
 
 if [ -z "$CHAT_ID_SELECTED" ]; then
-  read -rp " Entrez l'identifiant Telegram cible (Chat ID ou ID de Groupe) : " CHAT_ID_SELECTED
+  if [ -n "$EXISTING_CHAT" ]; then
+    read_interactive "  ID Telegram du groupe [Entrée pour conserver $EXISTING_CHAT] : " MANUAL_CHAT
+    CHAT_ID_SELECTED="${MANUAL_CHAT:-$EXISTING_CHAT}"
+  else
+    read_interactive "  Entrez l'identifiant Telegram du groupe d'équipe (ex: -100xxxxxxxxxx) : " CHAT_ID_SELECTED
+  fi
 fi
 
-if [ -z "$CHAT_ID_SELECTED" ]; then
-  log_error "Le Chat ID est obligatoire."
-  exit 1
-fi
+while [ -z "$CHAT_ID_SELECTED" ]; do
+  log_error "L'identifiant Telegram du groupe est indispensable."
+  read_interactive "  Entrez l'identifiant Telegram : " CHAT_ID_SELECTED
+done
 
 sed -i "/^export TG_CHAT=/d" "$ENV_FILE"
 echo "export TG_CHAT=\"$CHAT_ID_SELECTED\"" >> "$ENV_FILE"
-log_success "Chat ID Telegram configuré : $CHAT_ID_SELECTED"
+log_success "Groupe Telegram configuré : $CHAT_ID_SELECTED"
 
-# ---------- 6. Configuration du dépôt Git de l'équipe
-log_step "5/6 : Configuration du dépôt Git de l'équipe"
+# ---------- 6. Dépôt Git de l'équipe
+show_step 5 "Configuration du dépôt Git surveillé"
 
 DEFAULT_REPO="$LAB_DIR/demo-repo"
-echo -e "Entrez l'URL du dépôt GitHub de votre équipe à surveiller :"
-echo -e " ${DIM}(Exemple : https://github.com/MARKUPsoft-corp/relecteur.git ou appuyez sur Entrée pour utiliser $DEFAULT_REPO)${NC}"
-read -rp " Dépôt Git : " REPO_INPUT
+echo -e "  Entrez l'URL du dépôt GitHub de votre équipe à surveiller :"
+echo -e "  ${DIM}(Exemple: https://github.com/MARKUPsoft-corp/relecteur.git ou Entrée pour $DEFAULT_REPO)${NC}"
+read_interactive "  Dépôt Git : " REPO_INPUT
 
 TARGET_REPO="${REPO_INPUT:-$DEFAULT_REPO}"
 TARGET_BRANCH="main"
@@ -263,19 +340,18 @@ TARGET_BRANCH="main"
 if [[ "$TARGET_REPO" =~ ^https?:// ]] || [[ "$TARGET_REPO" =~ ^git@ ]]; then
   CLONE_DIR="$LAB_DIR/$(basename "$TARGET_REPO" .git)"
   if [ ! -d "$CLONE_DIR/.git" ]; then
-    log_info "Clonage du dépôt de l'équipe vers $CLONE_DIR..."
-    git clone "$TARGET_REPO" "$CLONE_DIR"
+    run_with_spinner "Clonage du dépôt d'équipe ($TARGET_REPO)..." git clone "$TARGET_REPO" "$CLONE_DIR"
   fi
   TARGET_REPO="$CLONE_DIR"
 fi
 
-read -rp " Branche à surveiller [défaut: main] : " BRANCH_INPUT
+read_interactive "  Branche à surveiller [Entrée pour 'main'] : " BRANCH_INPUT
 [ -n "$BRANCH_INPUT" ] && TARGET_BRANCH="$BRANCH_INPUT"
 
-log_success "Dépôt surveillé : $TARGET_REPO (branche: $TARGET_BRANCH)"
+log_success "Dépôt actif : $TARGET_REPO (branche: $TARGET_BRANCH)"
 
-# ---------- 7. Déploiement des scripts durcis (redact.sh & git-watch.sh)
-log_step "6/6 : Déploiement des scripts durcis & planification cron"
+# ---------- 7. Déploiement des scripts et planification cron
+show_step 6 "Génération des scripts durcis et activation cron"
 
 # Écriture de redact.sh
 cat << 'EOF' > "$BIN_DIR/redact.sh"
@@ -289,9 +365,9 @@ sed -E \
   -e 's/(password|passwd|secret|token|api[_-]?key)([[:space:]]*[=:][[:space:]]*)[^[:space:]]+/\1\2[REDACTED]/gI'
 EOF
 chmod +x "$BIN_DIR/redact.sh"
-log_success "Filtre de caviardage créé : $BIN_DIR/redact.sh"
+log_success "Filtre de caviardage anti-fuite déployé ($BIN_DIR/redact.sh)"
 
-# Écriture de git-watch.sh personnalisé pour cette équipe
+# Écriture de git-watch.sh
 cat << EOF > "$BIN_DIR/git-watch.sh"
 #!/usr/bin/env bash
 set -euo pipefail
@@ -411,44 +487,41 @@ Ne propose aucune commande à exécuter.
 done
 EOF
 chmod +x "$BIN_DIR/git-watch.sh"
-log_success "Script watcher déployé : $BIN_DIR/git-watch.sh"
+log_success "Script watcher déployé ($BIN_DIR/git-watch.sh)"
 
-# Test d'envoi du message de bienvenue dans le groupe d'équipe
-log_info "Envoi d'un message de bienvenue au groupe Telegram..."
-WELCOME_MSG="🎉 *Relecteur Git Automatique Actif !*
-L'équipe est désormais connectée à l'agent de revue de code intelligent.
-🌿 *Dépôt surveillé :* $(basename "$TARGET_REPO") ($TARGET_BRANCH)
+# Envoi du message d'accueil sur Telegram avec Spinner
+send_welcome() {
+  local welcome_txt="🎉 Relecteur Git Automatique Actif !
+L'équipe est connectée à l'agent de revue de code intelligent.
+🌿 Dépôt surveillé : $(basename "$TARGET_REPO") ($TARGET_BRANCH)
 Chaque nouveau commit sera analysé et résumé ici en direct !"
 
-resp=$(curl -s -X POST "https://api.telegram.org/bot${CURR_TOKEN}/sendMessage" \
-  -d chat_id="$CHAT_ID_SELECTED" \
-  -d parse_mode="Markdown" \
-  -d text="$WELCOME_MSG" || true)
+  curl -s -X POST "https://api.telegram.org/bot${CURR_TOKEN}/sendMessage" \
+    -d chat_id="$CHAT_ID_SELECTED" \
+    -d text="$welcome_txt" >/dev/null
+}
 
-if echo "$resp" | grep -q '"ok":true'; then
-  log_success "Message d'accueil envoyé avec succès sur Telegram !"
-else
-  log_warn "Le message de bienvenue n'a pas pu être transmis : $resp"
-fi
+run_with_spinner "Envoi du message d'accueil dans le groupe Telegram..." send_welcome
+log_success "Liaison Telegram confirmée en direct !"
 
 # Initialisation de l'état
 "$BIN_DIR/git-watch.sh" >/dev/null 2>&1 || true
 
-# Configuration de la Crontab
-log_info "Configuration de la tâche cron..."
+# Configuration de la tâche cron
+log_info "Configuration de la planification cron (toutes les minutes)..."
 CRON_LINE="* * * * * $BIN_DIR/git-watch.sh >> $REPORTS_DIR/cron.log 2>&1"
 CRON_PATH="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 (crontab -l 2>/dev/null | grep -v "git-watch.sh" || true; echo "$CRON_PATH"; echo "$CRON_LINE") | crontab -
-log_success "Tâche cron programmée pour une vérification toutes les minutes."
+log_success "Tâche cron active !"
 
 # ---------- Synthèse Finale
 echo -e "\n${GREEN}${BOLD}════════════════════════════════════════════════════════════════════${NC}"
-echo -e " ${GREEN}${BOLD}FÉLICITATIONS ! VOTRE RELECTEUR GIT EST PRÊT ET ACTIF !${NC}"
+echo -e " ${GREEN}${BOLD}🎉 FÉLICITATIONS ! VOTRE RELECTEUR D'ÉQUIPE EST PRÊT !${NC}"
 echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════════${NC}"
-echo -e " • Dépôt surveillé   : ${BOLD}$TARGET_REPO${NC}"
-echo -e " • Branche           : ${BOLD}$TARGET_BRANCH${NC}"
-echo -e " • Canal Telegram    : ${BOLD}$CHAT_ID_SELECTED${NC}"
-echo -e " • Journal des logs  : ${BOLD}$REPORTS_DIR/cron.log${NC}"
-echo -e " • Bac à sable IA    : ${BOLD}$SANDBOX_DIR${NC} (zéro pouvoir)"
-echo -e "\n${CYAN}Dès qu'un collaborateur pousse un commit sur GitHub, le groupe Telegram sera notifié !${NC}\n"
+echo -e "  • ${BOLD}Dépôt surveillé   :${NC} $TARGET_REPO"
+echo -e "  • ${BOLD}Branche suivie    :${NC} $TARGET_BRANCH"
+echo -e "  • ${BOLD}Groupe Telegram   :${NC} $CHAT_ID_SELECTED"
+echo -e "  • ${BOLD}Journal des logs  :${NC} $REPORTS_DIR/cron.log"
+echo -e "  • ${BOLD}Bac à sable IA    :${NC} $SANDBOX_DIR ${DIM}(Zero Trust)${NC}"
+echo -e "\n${CYAN}${BOLD}Dès qu'un membre pousse un commit sur GitHub, le groupe recevra son analyse !${NC}\n"
