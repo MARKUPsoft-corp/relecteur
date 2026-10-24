@@ -701,9 +701,11 @@ done
 
 {
   echo "$CRON_PATH"
-  [ -n "$BASE_CRONTAB" ] && echo "$BASE_CRONTAB"
-  echo "$NEW_CRON_LINES" | sed '/^$/d'
-} | sort -u | crontab -
+  {
+    [ -n "$BASE_CRONTAB" ] && echo "$BASE_CRONTAB"
+    echo "$NEW_CRON_LINES" | sed '/^$/d'
+  } | sort -u
+} | crontab -
 
 log_success "Tâches cron actives pour ${#REPOS_LIST[@]} dépôt(s) !"
 
