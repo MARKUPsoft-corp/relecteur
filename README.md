@@ -41,7 +41,7 @@ Sur votre machine de travail ou sur un serveur Linux (Ubuntu 22.04+, Debian ou W
 curl -fsSL https://raw.githubusercontent.com/MARKUPsoft-corp/relecteur/main/install.sh | bash
 ```
 
-L'assistant interactif coloré se charge de tout : vérification des paquets, configuration sécurisée, détection de vos groupes Telegram et planification cron.
+L'assistant interactif coloré se charge de tout : vérification des paquets, configuration sécurisée, détection de vos groupes Telegram, **surveillance multi-dépôts en parallèle** (avec routage vers le même groupe ou des canaux dédiés) et planification cron.
 
 ---
 
