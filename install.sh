@@ -239,21 +239,59 @@ echo -e "  ${CYAN}Pour relier le relecteur au groupe Telegram de votre équipe :
 echo -e "  ${DIM}1. Invitez votre bot (ex: @Markup_gitwatch_bot) dans votre groupe Telegram d'équipe.${NC}"
 echo -e "  ${DIM}2. Envoyez un message ou la commande /start dans le groupe pour ouvrir la liaison.${NC}\n"
 
-# Lecture du token existant
+# Lecture et validation du jeton Telegram
 CURR_TOKEN=$(grep -E '^export TG_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d'"' -f2 || true)
-if [ -n "$CURR_TOKEN" ]; then
+
+validate_and_test_token() {
+  local token="$1"
+  if [[ ! "$token" =~ ^[0-9]{8,12}:[a-zA-Z0-9_-]{30,}$ ]]; then
+    return 1
+  fi
+  local test_res
+  test_res=$(curl -s --max-time 8 "https://api.telegram.org/bot${token}/getMe" 2>/dev/null || echo "{}")
+  if echo "$test_res" | grep -q '"ok":true'; then
+    local bot_uname
+    bot_uname=$(python3 -c 'import sys, json; print(json.loads(sys.argv[1]).get("result", {}).get("username", ""))' "$test_res" 2>/dev/null || echo "")
+    echo "$bot_uname" > /tmp/tg_bot_uname.tmp
+    return 0
+  else
+    return 2
+  fi
+}
+
+TOKEN_VALID=0
+if [ -n "$CURR_TOKEN" ] && [[ "$CURR_TOKEN" =~ ^[0-9]{8,12}:[a-zA-Z0-9_-]{30,}$ ]]; then
   MASKED_TK="${CURR_TOKEN:0:6}...${CURR_TOKEN: -4}"
   read_interactive "  Jeton Telegram détecté ($MASKED_TK). Conserver ? [O/n] : " KEEP_TK
-  if [[ "$KEEP_TK" =~ ^[nN]$ ]]; then
-    read_interactive "  Entrez le nouveau Jeton Bot Telegram (de @BotFather) [masqué] : " CURR_TOKEN 1
+  if [[ ! "$KEEP_TK" =~ ^[nN]$ ]]; then
+    if validate_and_test_token "$CURR_TOKEN"; then
+      BOT_UNAME=$(cat /tmp/tg_bot_uname.tmp 2>/dev/null || echo "")
+      log_success "Jeton conservé et validé (Bot: @${BOT_UNAME:-actif})"
+      TOKEN_VALID=1
+    else
+      log_warn "Le jeton existant n'est plus reconnu par Telegram."
+    fi
   fi
-else
-  read_interactive "  Entrez le Jeton Bot Telegram (fourni par @BotFather) [masqué] : " CURR_TOKEN 1
 fi
 
-while [ -z "$CURR_TOKEN" ]; do
-  log_error "Le jeton Telegram est obligatoire."
-  read_interactive "  Entrez le Jeton Bot Telegram [masqué] : " CURR_TOKEN 1
+while [ "$TOKEN_VALID" -eq 0 ]; do
+  echo -e "  ${DIM}(Astuce Linux : pour coller dans le terminal, utilisez Clic-droit ou Ctrl+Maj+V)${NC}"
+  read_interactive "  Entrez le Jeton Bot Telegram (de @BotFather) [masqué] : " CANDIDATE_TOKEN 1
+
+  if validate_and_test_token "$CANDIDATE_TOKEN"; then
+    CURR_TOKEN="$CANDIDATE_TOKEN"
+    TOKEN_VALID=1
+    BOT_UNAME=$(cat /tmp/tg_bot_uname.tmp 2>/dev/null || echo "")
+    log_success "Jeton validé avec succès auprès de Telegram ! (Bot: @${BOT_UNAME})"
+  else
+    if [[ ! "$CANDIDATE_TOKEN" =~ ^[0-9]{8,12}:[a-zA-Z0-9_-]{30,}$ ]]; then
+      log_error "Format de jeton invalide (vous avez peut-être tapé 'v' au lieu de coller)."
+      echo -e "  ${YELLOW}Format attendu : 123456789:ABCdefGhI... (environ 45 caractères).${NC}"
+      echo -e "  ${YELLOW}💡 Rappel : sous Linux/Ubuntu, le collage se fait avec Ctrl+Maj+V ou Clic-droit !${NC}\n"
+    else
+      log_error "Ce jeton est refusé par l'API Telegram (401/404). Vérifiez le texte copié depuis @BotFather.\n"
+    fi
+  fi
 done
 
 sed -i "/^export TG_TOKEN=/d" "$ENV_FILE"
