@@ -348,56 +348,104 @@ sed -i "/^export TG_CHAT=/d" "$ENV_FILE"
 echo "export TG_CHAT=\"$CHAT_ID_SELECTED\"" >> "$ENV_FILE"
 log_success "Groupe Telegram configuré : $CHAT_ID_SELECTED"
 
-# ---------- 6. Dépôt Git de l'équipe
-show_step 5 "Configuration du dépôt Git surveillé"
+# ---------- 6. Dépôt(s) Git de l'équipe
+show_step 5 "Configuration du ou des dépôts Git surveillés"
+
+REPOS_LIST=()
+BRANCHES_LIST=()
+CHATS_LIST=()
+
+# Vérifier si des tâches de surveillance existent déjà
+EXISTING_WATCHERS=$(crontab -l 2>/dev/null | grep "$BIN_DIR/git-watch.sh" || true)
+KEEP_EXISTING=0
+
+if [ -n "$EXISTING_WATCHERS" ]; then
+  echo -e "  ${YELLOW}ℹ️  Des dépôts sont déjà sous surveillance dans votre crontab :${NC}"
+  echo "$EXISTING_WATCHERS" | while read -r line; do
+    echo -e "    • ${DIM}$line${NC}"
+  done
+  echo ""
+  echo -e "  Que souhaitez-vous faire ?"
+  echo -e "    ${BOLD}[1]${NC} Conserver les dépôts existants et en AJOUTER un nouveau"
+  echo -e "    ${BOLD}[2]${NC} Remplacer la configuration existante"
+  read_interactive "  Votre choix [1/2, par défaut 1] : " CHOICE_EXISTING
+  if [ "${CHOICE_EXISTING:-1}" = "1" ]; then
+    KEEP_EXISTING=1
+  fi
+fi
+
+configure_single_repo() {
+  local prompt_label="$1"
+  local default_repo="$2"
+  local target_repo=""
+  local target_branch="main"
+  local target_chat=""
+
+  echo -e "\n  ${BOLD}─── $prompt_label ───${NC}"
+  while [ -z "$target_repo" ]; do
+    echo -e "  Entrez l'URL du dépôt GitHub de votre équipe ou le chemin local :"
+    [ -n "$default_repo" ] && echo -e "  ${DIM}(Exemple: https://github.com/MARKUPsoft-corp/relecteur.git ou Entrée pour $default_repo)${NC}"
+    read_interactive "  Dépôt Git : " REPO_INPUT
+
+    CANDIDATE_REPO="${REPO_INPUT:-$default_repo}"
+    CANDIDATE_REPO="${CANDIDATE_REPO/#\~/$HOME}"
+
+    if [[ "$CANDIDATE_REPO" =~ ^https?:// ]] || [[ "$CANDIDATE_REPO" =~ ^git@ ]]; then
+      CLONE_DIR="$LAB_DIR/$(basename "$CANDIDATE_REPO" .git)"
+      if [ ! -d "$CLONE_DIR/.git" ]; then
+        if ! run_with_spinner "Clonage du dépôt d'équipe ($CANDIDATE_REPO)..." git clone "$CANDIDATE_REPO" "$CLONE_DIR"; then
+          log_error "Impossible de cloner '$CANDIDATE_REPO'. Vérifiez l'URL et vos droits."
+          continue
+        fi
+      fi
+      target_repo="$CLONE_DIR"
+    elif [ -d "$CANDIDATE_REPO/.git" ]; then
+      target_repo="$CANDIDATE_REPO"
+    else
+      log_error "Dépôt Git invalide : '$CANDIDATE_REPO' n'est ni une URL Git, ni un dossier Git existant (.git introuvable)."
+      [ -n "$default_repo" ] && echo -e "  ${YELLOW}💡 Astuce : Appuyez simplement sur [Entrée] pour utiliser le dépôt par défaut ($default_repo).${NC}\n"
+      continue
+    fi
+  done
+
+  while true; do
+    read_interactive "  Branche à surveiller [Entrée pour 'main'] : " BRANCH_INPUT
+    CANDIDATE_BRANCH="${BRANCH_INPUT:-main}"
+    
+    if git -C "$target_repo" rev-parse --verify "$CANDIDATE_BRANCH" >/dev/null 2>&1 || \
+       git -C "$target_repo" rev-parse --verify "origin/$CANDIDATE_BRANCH" >/dev/null 2>&1; then
+      target_branch="$CANDIDATE_BRANCH"
+      break
+    else
+      AVAIL_BRANCHES=$(git -C "$target_repo" branch -a --format='%(refname:short)' 2>/dev/null | sed 's/origin\///' | grep -v 'HEAD' | sort -u | tr '\n' ' ' || echo "main")
+      log_error "La branche '$CANDIDATE_BRANCH' est introuvable dans le dépôt."
+      echo -e "  ${YELLOW}Branches disponibles : ${AVAIL_BRANCHES:-main}${NC}"
+      echo -e "  ${DIM}Appuyez sur [Entrée] pour 'main' ou saisissez une branche existante.${NC}\n"
+    fi
+  done
+
+  read_interactive "  Groupe Telegram pour ce projet [Entrée pour $CHAT_ID_SELECTED] : " SPECIFIC_CHAT
+  target_chat="${SPECIFIC_CHAT:-$CHAT_ID_SELECTED}"
+
+  REPOS_LIST+=("$target_repo")
+  BRANCHES_LIST+=("$target_branch")
+  CHATS_LIST+=("$target_chat")
+  log_success "Dépôt configuré : $(basename "$target_repo") (branche: $target_branch, Telegram: $target_chat)"
+}
 
 DEFAULT_REPO="$LAB_DIR/demo-repo"
-TARGET_REPO=""
-TARGET_BRANCH="main"
-
-while [ -z "$TARGET_REPO" ]; do
-  echo -e "  Entrez l'URL du dépôt GitHub de votre équipe ou le chemin local :"
-  echo -e "  ${DIM}(Exemple: https://github.com/MARKUPsoft-corp/relecteur.git ou Entrée pour $DEFAULT_REPO)${NC}"
-  read_interactive "  Dépôt Git : " REPO_INPUT
-
-  CANDIDATE_REPO="${REPO_INPUT:-$DEFAULT_REPO}"
-  CANDIDATE_REPO="${CANDIDATE_REPO/#\~/$HOME}"
-
-  if [[ "$CANDIDATE_REPO" =~ ^https?:// ]] || [[ "$CANDIDATE_REPO" =~ ^git@ ]]; then
-    CLONE_DIR="$LAB_DIR/$(basename "$CANDIDATE_REPO" .git)"
-    if [ ! -d "$CLONE_DIR/.git" ]; then
-      if ! run_with_spinner "Clonage du dépôt d'équipe ($CANDIDATE_REPO)..." git clone "$CANDIDATE_REPO" "$CLONE_DIR"; then
-        log_error "Impossible de cloner '$CANDIDATE_REPO'. Vérifiez l'URL et vos droits."
-        continue
-      fi
-    fi
-    TARGET_REPO="$CLONE_DIR"
-  elif [ -d "$CANDIDATE_REPO/.git" ]; then
-    TARGET_REPO="$CANDIDATE_REPO"
-  else
-    log_error "Dépôt Git invalide : '$CANDIDATE_REPO' n'est ni une URL Git, ni un dossier Git existant (.git introuvable)."
-    echo -e "  ${YELLOW}💡 Astuce : Appuyez simplement sur [Entrée] pour utiliser le dépôt par défaut ($DEFAULT_REPO).${NC}\n"
-    continue
-  fi
-done
+configure_single_repo "Configuration du 1er dépôt" "$DEFAULT_REPO"
 
 while true; do
-  read_interactive "  Branche à surveiller [Entrée pour 'main'] : " BRANCH_INPUT
-  CANDIDATE_BRANCH="${BRANCH_INPUT:-main}"
-  
-  if git -C "$TARGET_REPO" rev-parse --verify "$CANDIDATE_BRANCH" >/dev/null 2>&1 || \
-     git -C "$TARGET_REPO" rev-parse --verify "origin/$CANDIDATE_BRANCH" >/dev/null 2>&1; then
-    TARGET_BRANCH="$CANDIDATE_BRANCH"
-    break
+  echo ""
+  read_interactive "➕ Souhaitez-vous surveiller un autre dépôt en parallèle ? [o/N] : " ADD_ANOTHER
+  if [[ "$ADD_ANOTHER" =~ ^[oOyY] ]]; then
+    IDX=$(( ${#REPOS_LIST[@]} + 1 ))
+    configure_single_repo "Configuration du dépôt #$IDX" ""
   else
-    AVAIL_BRANCHES=$(git -C "$TARGET_REPO" branch -a --format='%(refname:short)' 2>/dev/null | sed 's/origin\///' | grep -v 'HEAD' | sort -u | tr '\n' ' ' || echo "main")
-    log_error "La branche '$CANDIDATE_BRANCH' est introuvable dans le dépôt."
-    echo -e "  ${YELLOW}Branches disponibles : ${AVAIL_BRANCHES:-main}${NC}"
-    echo -e "  ${DIM}Appuyez sur [Entrée] pour 'main' ou saisissez une branche existante.${NC}\n"
+    break
   fi
 done
-
-log_success "Dépôt actif : $TARGET_REPO (branche: $TARGET_BRANCH)"
 
 # ---------- 7. Déploiement des scripts et planification cron
 show_step 6 "Génération des scripts durcis et activation cron"
@@ -416,22 +464,30 @@ EOF
 chmod +x "$BIN_DIR/redact.sh"
 log_success "Filtre de caviardage anti-fuite déployé ($BIN_DIR/redact.sh)"
 
-# Écriture de git-watch.sh
+# Écriture de git-watch.sh multi-dépôts durci
 cat << EOF > "$BIN_DIR/git-watch.sh"
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
 source "\$HOME/.config/ai-report/env"
 
-REPO="$TARGET_REPO"
-BRANCH="$TARGET_BRANCH"
+REPO="\${1:-${REPOS_LIST[0]}}"
+BRANCH="\${2:-${BRANCHES_LIST[0]}}"
+CHAT="\${3:-\$TG_CHAT}"
+REPO_NAME="\$(basename "\$REPO")"
+
 SANDBOX="$SANDBOX_DIR"
-STATE="$LAB_DIR/.last-commit"
+STATE="$LAB_DIR/.last-commit-\$REPO_NAME"
 OUT="$REPORTS_DIR"
 REDACT="$BIN_DIR/redact.sh"
 MAXBYTES=20000
 DENY_FLAGS=(--deny-tool='shell' --deny-tool='write' --deny-tool='url')
 mkdir -p "\$OUT" "\$SANDBOX"
+
+# Rétrocompatibilité d'état si un fichier sans suffixe existait
+if [ -f "$LAB_DIR/.last-commit" ] && [ ! -f "\$STATE" ] && [ "\$REPO" = "${REPOS_LIST[0]}" ]; then
+  cp "$LAB_DIR/.last-commit" "\$STATE" 2>/dev/null || true
+fi
 
 send_telegram() {
   local msg resp
@@ -440,13 +496,13 @@ send_telegram() {
     | sed -E 's/^#{1,6} *//; s/\\*\\*//g; s/\`//g' > "\$msg"
   resp=\$(printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "\$TG_TOKEN" \\
     | curl -s --max-time 20 -K - \\
-        -d chat_id="\$TG_CHAT" \\
+        -d chat_id="\$CHAT" \\
         --data-urlencode "text@\$msg") || { rm -f "\$msg"; return 1; }
   rm -f "\$msg"
   printf '%s' "\$resp" | grep -q '"ok":true'
 }
 
-exec 9>/tmp/git-watch.lock
+exec 9>"/tmp/git-watch-\$REPO_NAME.lock"
 flock -n 9 || exit 0
 
 export GIT_TERMINAL_PROMPT=0
@@ -460,14 +516,14 @@ fi
 NEW_HEAD=\$(git -C "\$REPO" rev-parse "\$TARGET_REF")
 if [ ! -f "\$STATE" ]; then
   echo "\$NEW_HEAD" > "\$STATE"
-  echo "\$(date -Is) premier lancement : état initialisé sur \$TARGET_REF"
+  echo "\$(date -Is) premier lancement : état initialisé sur \$REPO_NAME (\$TARGET_REF)"
   exit 0
 fi
 LAST=\$(cat "\$STATE")
 [ "\$NEW_HEAD" = "\$LAST" ] && exit 0
 
 if ! git -C "\$REPO" merge-base --is-ancestor "\$LAST" "\$NEW_HEAD"; then
-  echo "\$(date -Is) historique réécrit : état réinitialisé"
+  echo "\$(date -Is) historique réécrit : état réinitialisé sur \$REPO_NAME"
   echo "\$NEW_HEAD" > "\$STATE"
   exit 0
 fi
@@ -503,7 +559,7 @@ Ne propose aucune commande à exécuter.
   if (cd "\$SANDBOX" && timeout 120 "\$COPILOT_BIN" -p "\$PROMPT" -s \\
         "\${DENY_FLAGS[@]}") > "\$TMP" && [ -s "\$TMP" ]; then
     {
-      echo "🚀 NOUVEAU PUSH SUR GITHUB (\$BRANCH)"
+      echo "🚀 NOUVEAU PUSH SUR GITHUB (\$REPO_NAME · \$BRANCH)"
       echo "────────────────────────────────────"
       echo "👤 Auteur   : \$AUTHOR"
       echo "🔖 Commit   : \$SHORT — \$SUBJECT"
@@ -527,28 +583,34 @@ Ne propose aucune commande à exécuter.
     fi
     echo "\$(date -Is) rapport écrit : commit-\$SHORT.md"
     send_telegram "\$OUT/commit-\$SHORT.md" \\
-      && echo "\$(date -Is) Telegram : envoyé" \\
-      || echo "\$(date -Is) Telegram : ÉCHEC"
+      && echo "\$(date -Is) Telegram : envoyé (\$REPO_NAME)" \\
+      || echo "\$(date -Is) Telegram : ÉCHEC (\$REPO_NAME)"
   else
     rm -f "\$TMP"
-    echo "\$(date -Is) échec de Copilot sur \$SHORT"
+    echo "\$(date -Is) échec de Copilot sur \$SHORT (\$REPO_NAME)"
     exit 1
   fi
 done
 EOF
 chmod +x "$BIN_DIR/git-watch.sh"
-log_success "Script watcher déployé ($BIN_DIR/git-watch.sh)"
+log_success "Script watcher multi-dépôts déployé ($BIN_DIR/git-watch.sh)"
 
-# Envoi du message d'accueil sur Telegram avec Spinner et vérification réelle
+# Envoi des messages d'accueil et initialisation d'état pour chaque dépôt
 send_welcome() {
+  local target_repo="$1"
+  local target_branch="$2"
+  local chat_id="$3"
+  local repo_name
+  repo_name=$(basename "$target_repo")
+
   local welcome_txt="🎉 Relecteur Git Automatique Actif !
 L'équipe est connectée à l'agent de revue de code intelligent.
-🌿 Dépôt surveillé : $(basename "$TARGET_REPO") ($TARGET_BRANCH)
+🌿 Dépôt surveillé : ${repo_name} (${target_branch})
 Chaque nouveau commit sera analysé et résumé ici en direct !"
 
   local resp
   resp=$(curl -s --max-time 15 -X POST "https://api.telegram.org/bot${CURR_TOKEN}/sendMessage" \
-    -d chat_id="$CHAT_ID_SELECTED" \
+    -d chat_id="$chat_id" \
     -d text="$welcome_txt" 2>/dev/null || echo "{}")
 
   if echo "$resp" | grep -q '"ok":true'; then
@@ -561,32 +623,64 @@ Chaque nouveau commit sera analysé et résumé ici en direct !"
   fi
 }
 
-if run_with_spinner "Envoi du message d'accueil dans le groupe Telegram..." send_welcome; then
-  log_success "Liaison Telegram confirmée en direct !"
-else
-  TG_ERR=$(cat /tmp/tg_err.tmp 2>/dev/null || echo "Erreur API")
-  log_error "Échec de l'envoi Telegram : $TG_ERR (chat_id: $CHAT_ID_SELECTED)"
-  echo -e "  ${YELLOW}⚠️ Le bot n'a pas pu envoyer le message. Assurez-vous que le bot est membre ou administrateur du groupe.${NC}"
-fi
+for i in "${!REPOS_LIST[@]}"; do
+  r="${REPOS_LIST[$i]}"
+  b="${BRANCHES_LIST[$i]}"
+  c="${CHATS_LIST[$i]}"
+  r_name=$(basename "$r")
 
-# Initialisation de l'état
-"$BIN_DIR/git-watch.sh" >/dev/null 2>&1 || true
+  if run_with_spinner "Envoi du message d'accueil pour '$r_name'..." send_welcome "$r" "$b" "$c"; then
+    log_success "Liaison Telegram confirmée pour '$r_name' (chat: $c) !"
+  else
+    TG_ERR=$(cat /tmp/tg_err.tmp 2>/dev/null || echo "Erreur API")
+    log_error "Échec de l'envoi Telegram pour '$r_name' : $TG_ERR (chat_id: $c)"
+    echo -e "  ${YELLOW}⚠️ Assurez-vous que le bot est membre ou administrateur du groupe $c.${NC}"
+  fi
+
+  # Initialisation de l'état
+  "$BIN_DIR/git-watch.sh" "$r" "$b" "$c" >/dev/null 2>&1 || true
+done
 
 # Configuration de la tâche cron
 log_info "Configuration de la planification cron (toutes les minutes)..."
-CRON_LINE="* * * * * $BIN_DIR/git-watch.sh >> $REPORTS_DIR/cron.log 2>&1"
 CRON_PATH="PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
-(crontab -l 2>/dev/null | grep -v "git-watch.sh" | grep -v "PATH=" || true; echo "$CRON_PATH"; echo "$CRON_LINE") | crontab -
-log_success "Tâche cron active !"
+if [ "$KEEP_EXISTING" -eq 1 ]; then
+  BASE_CRONTAB=$(crontab -l 2>/dev/null | grep -v "PATH=" || true)
+else
+  BASE_CRONTAB=$(crontab -l 2>/dev/null | grep -v "git-watch.sh" | grep -v "PATH=" || true)
+fi
+
+NEW_CRON_LINES=""
+for i in "${!REPOS_LIST[@]}"; do
+  r="${REPOS_LIST[$i]}"
+  b="${BRANCHES_LIST[$i]}"
+  c="${CHATS_LIST[$i]}"
+  r_name=$(basename "$r")
+  NEW_CRON_LINES="${NEW_CRON_LINES}
+* * * * * $BIN_DIR/git-watch.sh \"$r\" \"$b\" \"$c\" >> $REPORTS_DIR/cron-$r_name.log 2>&1"
+done
+
+{
+  echo "$CRON_PATH"
+  [ -n "$BASE_CRONTAB" ] && echo "$BASE_CRONTAB"
+  echo "$NEW_CRON_LINES" | sed '/^$/d'
+} | sort -u | crontab -
+
+log_success "Tâches cron actives pour ${#REPOS_LIST[@]} dépôt(s) !"
 
 # ---------- Synthèse Finale
 echo -e "\n${GREEN}${BOLD}════════════════════════════════════════════════════════════════════${NC}"
 echo -e " ${GREEN}${BOLD}🎉 FÉLICITATIONS ! VOTRE RELECTEUR D'ÉQUIPE EST PRÊT !${NC}"
 echo -e "${GREEN}${BOLD}════════════════════════════════════════════════════════════════════${NC}"
-echo -e "  • ${BOLD}Dépôt surveillé   :${NC} $TARGET_REPO"
-echo -e "  • ${BOLD}Branche suivie    :${NC} $TARGET_BRANCH"
-echo -e "  • ${BOLD}Groupe Telegram   :${NC} $CHAT_ID_SELECTED"
-echo -e "  • ${BOLD}Journal des logs  :${NC} $REPORTS_DIR/cron.log"
-echo -e "  • ${BOLD}Bac à sable IA    :${NC} $SANDBOX_DIR ${DIM}(Zero Trust)${NC}"
+echo -e "  • ${BOLD}Nombre de dépôts surveillés :${NC} ${#REPOS_LIST[@]}"
+for i in "${!REPOS_LIST[@]}"; do
+  r="${REPOS_LIST[$i]}"
+  b="${BRANCHES_LIST[$i]}"
+  c="${CHATS_LIST[$i]}"
+  r_name=$(basename "$r")
+  echo -e "    ${CYAN}[$((i+1))]${NC} ${BOLD}$r_name${NC} ($r) | branche: $b | Telegram: $c"
+done
+echo -e "  • ${BOLD}Journal des rapports IA     :${NC} $REPORTS_DIR"
+echo -e "  • ${BOLD}Bac à sable IA stérile      :${NC} $SANDBOX_DIR ${DIM}(Zero Trust)${NC}"
 echo -e "\n${CYAN}${BOLD}Dès qu'un membre pousse un commit sur GitHub, le groupe recevra son analyse !${NC}\n"
