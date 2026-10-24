@@ -451,7 +451,7 @@ flock -n 9 || exit 0
 
 export GIT_TERMINAL_PROMPT=0
 if git -C "\$REPO" remote get-url origin >/dev/null 2>&1; then
-  timeout 20 git -C "\$REPO" fetch origin "\$BRANCH" --quiet 2>/dev/null || true
+  timeout 120 git -C "\$REPO" fetch origin "\$BRANCH" --quiet 2>/dev/null || true
   TARGET_REF="origin/\$BRANCH"
 else
   TARGET_REF="HEAD"
@@ -523,7 +523,7 @@ Ne propose aucune commande à exécuter.
     rm -f "\$TMP"
     echo "\$C" > "\$STATE"
     if [ "\$TARGET_REF" != "HEAD" ]; then
-      timeout 20 git -C "\$REPO" merge --ff-only "origin/\$BRANCH" 2>/dev/null || true
+      timeout 60 git -C "\$REPO" merge --ff-only "origin/\$BRANCH" 2>/dev/null || true
     fi
     echo "\$(date -Is) rapport écrit : commit-\$SHORT.md"
     send_telegram "\$OUT/commit-\$SHORT.md" \\
