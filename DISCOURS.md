@@ -134,30 +134,44 @@ Grâce à notre démarcation stricte en balises XML `<diff>` et à l'instruction
 
 ---
 
-## 🚀 Acte V — L'Industrialisation & La Clôture (35:00 – 40:00)
+## 🚀 Acte V — L'Industrialisation, le Multi-Dépôts & La Clôture (35:00 – 42:00)
+*[Slide 26 — Pour aller plus loin : Multi-dépôts & Alertes intelligentes]*
+
+« Avant de conclure, une question que vous vous posez certainement :  
+*"Emmanuel, dans mon entreprise, nous n'avons pas un seul dépôt, mais 10 microservices. Est-ce que ça scale ?"*
+
+La réponse est : **oui, sans aucune friction.**  
+Grâce à l'isolation par verrou `flock` et à des fichiers d'état distincts par dépôt, vous pouvez faire tourner 10 surveillants en parallèle sur la même machine. Chaque microservice tourne de façon totalement étanche, et vous pouvez même router les alertes du frontend vers le canal Telegram des équipes front, et le backend vers l'équipe back.
+
+Mieux encore : vous pouvez calibrer le script pour n'envoyer de notification Telegram que si Copilot ou le script détectent un niveau de risque `CRITIQUE`, `ATTENTION` ou un secret `REDACTED`. Ainsi, zéro fatigue d'alerte : le bot ne notifie l'équipe que quand il y a un vrai danger.
+
 *[Slide 27 — L'Installateur en 1 ligne]*
 
-« Quand on présente ce genre d'architecture, les gens disent souvent : *"C'est fantastique, mais ça a l'air long et complexe à mettre en place dans mon entreprise."*
+Quand on présente ce genre d'architecture, les gens disent souvent : *"C'est fantastique, mais ça a l'air long et complexe à mettre en place dans mon entreprise."*
 
 Alors avec mon équipe, nous avons fait ce que tout bon ingénieur doit faire : nous avons entièrement packagé et durci ce projet.
 
-Aujourd'hui, pour équiper n'importe quelle équipe de développement, sur n'importe quel dépôt GitHub, il vous suffit d'une seule commande :
+Aujourd'hui, pour équiper n'importe quelle équipe de développement, sur n'importe quel dépôt GitHub, il vous suffit d'une seule ligne de commande dans votre terminal :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MARKUPsoft-corp/relecteur/main/install.sh | bash
 ```
 
 En moins de 60 secondes :
-- L'assistant vérifie vos dépendances.
-- Il met en place l'environnement confiné et les droits `chmod 600`.
-- Il teste en direct la liaison Telegram et vous envoie un message d'accueil.
-- Il active la surveillance cron.
+- L'assistant interactif vérifie vos dépendances.
+- Il met en place l'environnement confiné et les permissions strictes `chmod 600`.
+- Il connecte votre groupe Telegram en direct avec un message de bienvenue.
+- Il arme la surveillance automatique `cron`.
 
-Vos développeurs continuent de coder dans leur IDE favori, poussent avec leur Git habituel, et l'ensemble de l'équipe bénéficie d'un filet de sécurité permanent.
+Vos développeurs n'ont aucun bot à installer. Ils continuent de coder dans leur IDE favori, poussent avec leur Git habituel, et l'ensemble de l'équipe bénéficie d'un filet de sécurité permanent.
+
+*[Slide 28 — Liste de contrôle]*
+
+Toutes les étapes que nous avons vues aujourd'hui sont reproductibles, pas à pas, avec une checklist claire : de la création du token Fine-grained à l'activation du mode Zero Trust.
 
 *[Slide 29 — Slide de clôture]*
 
-*(Pause. Voix posée et inspirante.)*
+*(Pause de 2 secondes. Voix posée, chaleureuse et inspirante.)*
 
 Pour conclure, je voudrais vous laisser avec cette conviction :
 
